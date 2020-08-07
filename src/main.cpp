@@ -2,7 +2,7 @@
 #include <WiFiClient.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
-#include <MHZ.h>
+//#include <MHZ.h>
 
 #include <soc/soc.h>
 #include <soc/rtc_cntl_reg.h>
@@ -36,17 +36,16 @@ PubSubClient client(espClient);
 #define TXD2 17 //TX2 pin
 #define byte uint8_t
 
-MHZ co2(RXD2, TXD2, MHZ14A);
+//MHZ co2(RXD2, TXD2, MHZ14A);
 
-const byte requestReading[] = {0xFF, 0x01, 0x86, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79};
-byte result[9];
+
 
 void setup_wifi() {
+    if (WiFi.status() == WL_CONNECTED) return;
     Serial.print("Starting Wifi connection to ");
     Serial.println(ssid);
-    if (WiFi.status() == WL_CONNECTED) return;
     WiFi.mode(WIFI_STA);
-//    WiFi.config(ip, gateway, subnet);
+    WiFi.config(ip, gateway, subnet);
     WiFi.begin(ssid, password);
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
@@ -75,6 +74,65 @@ void reconnect() {
 }
 
 
+// Compute the MODBUS RTU CRC
+uint16_t ModRTU_CRC(byte *buf, int len) {
+    uint16_t crc = 0xFFFF;
+
+    for (int pos = 0; pos < len; pos++) {
+        crc ^= (uint16_t) buf[pos];          // XOR byte into least sig. byte of crc
+
+        for (int i = 8; i != 0; i--) {    // Loop over each bit
+            if ((crc & 0x0001) != 0) {      // If the LSB is set
+                crc >>= 1;                    // Shift right and XOR 0xA001
+                crc ^= 0xA001;
+            } else                            // Else LSB is not set
+                crc >>= 1;                    // Just shift right
+        }
+    }
+    // Note, this number has low and high bytes swapped, so use it accordingly (or swap bytes)
+    return crc;
+}
+
+const byte requestReading[] = {0x68, 0x04, 0x00, 0x00, 0x00, 0x04, 0xF8, 0xF0};
+byte result[13];
+
+int readPPMSerial() {
+    for (int i = 0; i < 8; i++) {
+        Serial2.write(requestReading[i]);
+    }
+//    delay(100);
+//    Serial.print("Sent request. Response: ");
+    long int waited = 0L;
+    while (Serial2.available() < 13) {
+        waited++;
+        if (waited > 100000L) {
+            sprintf(msg_debug, "ESP32 status: Could not read UART serial");
+            client.publish("DEBUG", msg_debug);
+            ESP.restart();
+        }
+    }; // wait for response
+    for (int i = 0; i < 13; i++) {
+        result[i] = Serial2.read();
+//        Serial.printf("%X", result[i]);
+//        Serial.print(" ");
+    }
+//    Serial.println();
+    uint16_t crc = ModRTU_CRC(result, 11);
+    int crc_high = result[11];
+    int crc_low = result[12];
+    if (crc == crc_low * 256 + crc_high) {
+        int high = result[9];
+        int low = result[10];
+        return high * 256 + low;
+    } else {
+        Serial.print("CRC incorrect. Got: ");
+        Serial.print(crc);
+        Serial.print(" expected: ");
+        Serial.println(crc_low * 256 + crc_high);
+        return -1;
+    }
+
+}
 
 void setup() {
     //disable brownout reset (low power reset)
@@ -86,66 +144,40 @@ void setup() {
     if (!client.connected()) {
         reconnect();
     }
-    delay(60);
-    sprintf(msg_debug, "ESP32 status: preheating");
+    sprintf(msg_debug, "ESP32 status: Connected");
     client.publish("DEBUG", msg_debug);
 
-    co2.setDebug(false);
-    if (co2.isPreHeating()) {
-        Serial.print("Preheating");
-        while (co2.isPreHeating()) {
-            Serial.print(".");
-            delay(5000);
-        }
-        Serial.println();
-    }
-//    Serial2.begin(9600,SERIAL_8N1, RXD2, TXD2);
+    Serial2.begin(9600, SERIAL_8N1, RXD2, TXD2);
+    delay(60);
 }
-
-int readPPMSerial() {
-    for (int i = 0; i < 9; i++) {
-        Serial2.write(requestReading[i]);
-    }
-    //Serial.println("sent request");
-    while (Serial2.available() < 9) {}; // wait for response
-    for (int i = 0; i < 9; i++) {
-        result[i] = Serial2.read();
-    }
-    int high = result[2];
-    int low = result[3];
-    //Serial.print(high); Serial.print(" ");Serial.println(low);
-    return high * 256 + low;
-}
-
 
 void loop() {
-
 
     if (!client.connected()) {
         reconnect();
     }
-    delay(60);
-
-    int reading = co2.readCO2UART();
-    Serial.print("CO2 ppm: ");
+//    delay(60);
+    long int m = millis() / 1000L;
+    Serial.print("Starting to read - ");
+    Serial.println(m);
+    int reading = readPPMSerial();
     if (reading > 0) {
-        Serial.print(reading);
-        Serial.print(", T: ");
-        Serial.println(co2.getLastTemperature());
+        Serial.print("CO2: ");
+        Serial.println(reading);
         sprintf(msg, "%i", reading);
         client.publish("CO2", msg);
-        sprintf(msg_tmp, "%i", co2.getLastTemperature());
-        client.publish("TEMP", msg_tmp);
-        long int m = millis() / 1000L;
+        delay(50);
         sprintf(msg_debug, "Reading OK [%ld]", m);
         client.publish("DEBUG", msg_debug);
     } else {
-        Serial.print("UART n/a: ");
-        Serial.println(reading);
-        //debug message
         sprintf(msg_debug, "UART error: %i", reading);
         client.publish("DEBUG", msg_debug);
     }
 
-    delay(60100L);
+    esp_sleep_enable_timer_wakeup(60000000L);
+    Serial.println("Going to sleep now");
+//    delay(1000);
+    Serial.flush();
+    esp_deep_sleep_start();
+
 }
