@@ -6,6 +6,7 @@
 
 #include <soc/soc.h>
 #include <soc/rtc_cntl_reg.h>
+#include <esp32-hal-cpu.h>
 
 
 #ifndef STASSID
@@ -59,6 +60,7 @@ void setup_wifi() {
 void reconnect() {
     setup_wifi();
     Serial.println("In MQTT reconnection...");
+    client.setServer(mqtt_server, 1883);
     client.setKeepAlive(70);
     while (!client.connected()) {
         Serial.print("Attempting MQTT connection...");
@@ -137,25 +139,27 @@ int readPPMSerial() {
 void setup() {
     //disable brownout reset (low power reset)
     WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+    setCpuFrequencyMhz(80); //Set CPU clock to 80MHz fo example
+    int cs = getCpuFrequencyMhz(); //Get CPU clock
 
     Serial.begin(115200);
-    setup_wifi();
-    client.setServer(mqtt_server, 1883);
-    if (!client.connected()) {
-        reconnect();
-    }
-    sprintf(msg_debug, "ESP32 status: Connected");
-    client.publish("DEBUG", msg_debug);
+//    setup_wifi();
+//    client.setServer(mqtt_server, 1883);
+//    if (!client.connected()) {
+//        reconnect();
+//    }
+//    sprintf(msg_debug, "ESP32 status: Connected");
+//    client.publish("DEBUG", msg_debug);
 
     Serial2.begin(9600, SERIAL_8N1, RXD2, TXD2);
     delay(60);
+    Serial.print("Clock speed: ");
+    Serial.println(cs);
 }
 
 void loop() {
 
-    if (!client.connected()) {
-        reconnect();
-    }
+
 //    delay(60);
     long int m = millis() / 1000L;
     Serial.print("Starting to read - ");
@@ -164,20 +168,27 @@ void loop() {
     if (reading > 0) {
         Serial.print("CO2: ");
         Serial.println(reading);
+        if (!client.connected()) {
+            reconnect();
+        }
         sprintf(msg, "%i", reading);
         client.publish("CO2", msg);
         delay(50);
         sprintf(msg_debug, "Reading OK [%ld]", m);
         client.publish("DEBUG", msg_debug);
     } else {
+        if (!client.connected()) {
+            reconnect();
+        }
         sprintf(msg_debug, "UART error: %i", reading);
         client.publish("DEBUG", msg_debug);
     }
 
-    esp_sleep_enable_timer_wakeup(60000000L);
+//    esp_sleep_enable_timer_wakeup(60000000L);
     Serial.println("Going to sleep now");
 //    delay(1000);
     Serial.flush();
-    esp_deep_sleep_start();
+    delay(16000);
+//    esp_deep_sleep_start();
 
 }
