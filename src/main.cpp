@@ -7,6 +7,9 @@
 #include <soc/soc.h>
 #include <soc/rtc_cntl_reg.h>
 #include <esp32-hal-cpu.h>
+#include "driver/adc.h"
+#include <esp_wifi.h>
+#include <esp_bt.h>
 
 
 #ifndef STASSID
@@ -39,7 +42,20 @@ PubSubClient client(espClient);
 
 //MHZ co2(RXD2, TXD2, MHZ14A);
 
-
+void goToDeepSleep(int minutes) {
+    // DEEP SLEEP ROUTINE START
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    btStop();
+    adc_power_off();
+    esp_wifi_stop();
+    esp_bt_controller_disable();
+    esp_sleep_enable_timer_wakeup(minutes * 60L * 1000000L);
+    Serial.print("Going to sleep now for minutes: ");
+    Serial.println(minutes);
+    Serial.flush();
+    esp_deep_sleep_start();
+}
 
 void setup_wifi() {
     if (WiFi.status() == WL_CONNECTED) return;
@@ -48,9 +64,15 @@ void setup_wifi() {
     WiFi.mode(WIFI_STA);
     WiFi.config(ip, gateway, subnet);
     WiFi.begin(ssid, password);
+    int failed_counter = 0;
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
         Serial.print(".");
+        failed_counter++;
+        if (failed_counter > 10) {
+            Serial.println("Wifi connection failed");
+            goToDeepSleep(2);
+        }
     }
     Serial.println("WiFi connected");
     Serial.print("IP address: ");
@@ -59,9 +81,10 @@ void setup_wifi() {
 
 void reconnect() {
     setup_wifi();
-    Serial.println("In MQTT reconnection...");
+    Serial.print("MQTT connect...");
     client.setServer(mqtt_server, 1883);
     client.setKeepAlive(70);
+    int failed_counter = 0;
     while (!client.connected()) {
         Serial.print("Attempting MQTT connection...");
         if (client.connect("Client_ESP32")) {
@@ -71,6 +94,11 @@ void reconnect() {
             Serial.print(client.state());
             Serial.println(" try again in 3 seconds");
             delay(3000);
+            failed_counter++;
+            if (failed_counter > 10) {
+                Serial.println("MQTT connection failed");
+                goToDeepSleep(2);
+            }
         }
     }
 }
@@ -136,11 +164,12 @@ int readPPMSerial() {
 
 }
 
+
 void setup() {
     //disable brownout reset (low power reset)
     WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
     setCpuFrequencyMhz(80); //Set CPU clock to 80MHz fo example
-    int cs = getCpuFrequencyMhz(); //Get CPU clock
+//    int cs = getCpuFrequencyMhz(); //Get CPU clock
 
     Serial.begin(115200);
 //    setup_wifi();
@@ -150,17 +179,11 @@ void setup() {
 //    }
 //    sprintf(msg_debug, "ESP32 status: Connected");
 //    client.publish("DEBUG", msg_debug);
-
     Serial2.begin(9600, SERIAL_8N1, RXD2, TXD2);
-    delay(60);
-    Serial.print("Clock speed: ");
-    Serial.println(cs);
+    Serial.println("Setup finished");
 }
 
 void loop() {
-
-
-//    delay(60);
     long int m = millis() / 1000L;
     Serial.print("Starting to read - ");
     Serial.println(m);
@@ -184,11 +207,7 @@ void loop() {
         client.publish("DEBUG", msg_debug);
     }
 
-//    esp_sleep_enable_timer_wakeup(60000000L);
-    Serial.println("Going to sleep now");
-//    delay(1000);
-    Serial.flush();
-    delay(16000);
-//    esp_deep_sleep_start();
+    goToDeepSleep(2);
+    //    delay(16000);
 
 }
