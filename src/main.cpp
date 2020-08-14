@@ -2,12 +2,11 @@
 #include <WiFiClient.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
-//#include <MHZ.h>
-
 #include <soc/soc.h>
 #include <soc/rtc_cntl_reg.h>
 #include <esp32-hal-cpu.h>
 #include "driver/adc.h"
+#include "../lib/Sunrise/Sunrise.h"
 #include <esp_wifi.h>
 #include <esp_bt.h>
 
@@ -33,6 +32,8 @@ char msg[10];
 char msg_debug[10];
 char msg_tmp[10];
 
+RTC_DATA_ATTR float minutesSinceFirstBoot = 0.0;
+
 WiFiClient espClient;
 PubSubClient client(espClient);
 
@@ -56,6 +57,7 @@ void goToDeepSleep(int minutes) {
     Serial.print("Going to sleep now for minutes: ");
     Serial.println(minutes);
     Serial.flush();
+    minutesSinceFirstBoot += minutes + (millis() / 1000 / 60.0);
     esp_deep_sleep_start();
 }
 
@@ -128,91 +130,6 @@ uint16_t ModRTU_CRC(byte *buf, int len) {
 }
 
 
-void getCurrentMeasurementMode() {
-    char received;
-    const byte getMMode[] = {0x68, 0x03, 0x00, 0x0A, 0x00, 0x01, 0xAD, 0x31};
-    int len = sizeof(getMMode) / sizeof(getMMode[0]);
-    Serial.println("Enabling sensor and sending getCurrentMeasurementMode command");
-    digitalWrite(SENS_ENABLE, HIGH);
-    delay(50);
-    for (int i = 0; i < len; i++) {
-        Serial2.write(getMMode[i]);
-    }
-    delay(50);
-    Serial.println("Response: ");
-    while (Serial2.available()) {
-        received = Serial2.read();
-        Serial.printf("%.2X", received);
-        Serial.print(" ");
-    }
-    Serial.println("Done");
-    digitalWrite(SENS_ENABLE, LOW);
-}
-
-void setSingleMeasurementMode() {
-    char received;
-    const byte setSingleMode[] = {0x68, 0x10, 0x00, 0x0A, 0x00, 0x01, 0x02, 0x00, 0x01, 0xA5, 0x68};
-//  const byte setContinuosMode[] = {0x68, 0x10, 0x00, 0x0A, 0x00, 0x01, 0x02, 0x00, 0x00, 0x64, 0xA8};
-    int len = sizeof(setSingleMode) / sizeof(setSingleMode[0]);
-    Serial.println("Enabling sensor and sending Reading Mode command");
-    digitalWrite(SENS_ENABLE, HIGH);
-    delay(50);
-    for (int i = 0; i < len; i++) {
-        Serial2.write(setSingleMode[i]);
-    }
-    delay(50);
-    Serial.println("Response: ");
-    while (Serial2.available()) {
-        received = Serial2.read();
-        Serial.printf("%.2X", received);
-        Serial.print(" ");
-    }
-    Serial.println("Done");
-    digitalWrite(SENS_ENABLE, LOW);
-}
-
-int readPPMSerialContinuous() {
-//    const byte requestReading[] = {0x68, 0x04, 0x00, 0x00, 0x00, 0x04, 0xF8, 0xF0};
-    const byte requestReading[] = {0x68, 0x04, 0x00, 0x00, 0x00, 0x05, 0x39, 0x30}; //with temp
-    int len = sizeof(requestReading) / sizeof(requestReading[0]);
-    byte result[15];
-    for (int i = 0; i < len; i++) {
-        Serial2.write(requestReading[i]);
-    }
-    long int waited = 0L;
-    while (Serial2.available() < 15) {
-        waited++;
-        if (waited > 100000L) {
-            sprintf(msg_debug, "ESP32 status: Could not read UART serial");
-            client.publish("DEBUG", msg_debug);
-//            ESP.restart();
-            Serial.println("Timout while reading serial");
-            return -2;
-        }
-    }; // wait for response
-    Serial.print("Resp: ");
-    for (int i = 0; i < 15; i++) {
-        result[i] = Serial2.read();
-        Serial.printf("%.2X", result[i]);
-        Serial.print(" ");
-    }
-    uint16_t crc = ModRTU_CRC(result, 11);
-    int crc_high = result[13];
-    int crc_low = result[14];
-    if (crc == crc_low * 256 + crc_high) {
-        int low = result[10];
-        int high = result[9];
-        //TODO temp is in 12,11 (0x091A == 2330 == 23.30 C)
-        return high * 256 + low;
-    } else {
-        Serial.print("CRC incorrect. Got: ");
-        Serial.print(crc);
-        Serial.print(" expected: ");
-        Serial.println(crc_low * 256 + crc_high);
-        return -1;
-    }
-}
-
 int readPPMSerialSingle() {
 //    const byte requestReading[] = {0x68, 0x04, 0x00, 0x00, 0x00, 0x04, 0xF8, 0xF0};
     const byte requestReading[] = {0x68, 0x04, 0x00, 0x00, 0x00, 0x05, 0x39, 0x30}; //with temp
@@ -235,7 +152,14 @@ int readPPMSerialSingle() {
         Serial2.write(startMeasurement[i]);
     }
     Serial.print("Response: ");
-    while (Serial2.available() < 8) {}
+    long int waited = 0L;
+    while (Serial2.available() < 8) {
+        waited++;
+        if (waited > 100000L) {
+            Serial.print("Serial2 read error.");
+            goToDeepSleep(2);
+        }
+    }
     for (int i = 0; i < 8; i++) {
         received = Serial2.read();
         Serial.printf("%.2X", received);
@@ -244,14 +168,14 @@ int readPPMSerialSingle() {
     Serial.println("");
 
     // STEP 4 - WAIT RDY LOW or 2 sec
-    while(digitalRead(SENS_RDY));
+    while (digitalRead(SENS_RDY));
 
     // STEP 5 - Read IR1-IR5
     Serial.println("Step5: requestReading");
     for (int i = 0; i < len; i++) {
         Serial2.write(requestReading[i]);
     }
-    long int waited = 0L;
+    waited = 0L;
     while (Serial2.available() < 15) {
         waited++;
         if (waited > 100000L) {
@@ -288,6 +212,8 @@ int readPPMSerialSingle() {
     }
 }
 
+Sunrise sunrise(RXD2, TXD2, true);
+
 void setup() {
     //disable brownout reset (low power reset)
     WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
@@ -295,37 +221,44 @@ void setup() {
 //    int cs = getCpuFrequencyMhz(); //Get CPU clock
 
     Serial.begin(115200);
-//    setup_wifi();
-//    client.setServer(mqtt_server, 1883);
-//    if (!client.connected()) {
-//        reconnect();
-//    }
-//    sprintf(msg_debug, "ESP32 status: Connected");
-//    client.publish("DEBUG", msg_debug);
-    Serial2.begin(9600, SERIAL_8N1, RXD2, TXD2);
     Serial.println("Setup finished");
     pinMode(SENS_RDY, INPUT);
     pinMode(SENS_ENABLE, OUTPUT);
     digitalWrite(SENS_ENABLE, LOW);
 
+//    Serial.println("Setting mode to continuous after 10 sec");
+//    delay(10000);
+//    setContMeasurementMode();
+//    Serial.println("Waiting for 10 sec");
+//    delay(10000);
 
 }
 
+
 void loop() {
-    long int m = millis() / 1000L;
-    Serial.print("Starting to read (ms) - ");
-    Serial.println(m);
-    int reading = readPPMSerialSingle();
+    Serial.println("DEBUGIN NEW LIB");
+
+    int mm = sunrise.getCurrentMeasurementMode();
+    Serial.print("MM: ");
+    Serial.println(mm);
+    Serial.println("END DEBUGGIN NEW LIB");
+
+
+    Serial.print("Starting to read (min_since_start): ");
+    Serial.println(minutesSinceFirstBoot);
+//    int reading = readPPMSerialSingle();
+    int reading = sunrise.requestReading();
     if (reading > 0) {
         Serial.print("CO2: ");
         Serial.println(reading);
+        Serial.print("Temp: ");
+        Serial.println(sunrise.getLastTemp());
         if (!client.connected()) {
             reconnect();
         }
         sprintf(msg, "%i", reading);
         client.publish("CO2", msg);
-        delay(50);
-        sprintf(msg_debug, "Reading OK [%ld]", m);
+        sprintf(msg_debug, "Reading OK [%4.2f]", minutesSinceFirstBoot);
         client.publish("DEBUG", msg_debug);
     } else {
         if (!client.connected()) {
