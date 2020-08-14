@@ -4,7 +4,6 @@
 
 
 #include "ModbusSerial.h"
-#include <string.h>
 
 const int STATUS_OK = 0;
 const int STATUS_NO_RESPONSE = -2;
@@ -56,7 +55,7 @@ int ModbusSerial::writeMultipleRegisters(const byte *startingAddress, const byte
     int responseLength = 8;
     const byte request_pdu[] = {functionCode, startingAddress[0], startingAddress[1], numberOfRegister[0],
                                 numberOfRegister[1], numberOfDataBytes};
-    byte full_request_pdu[numberOfDataBytes+6];
+    byte *full_request_pdu = new byte[numberOfDataBytes+6];
     memcpy(full_request_pdu, request_pdu,6);
     memcpy(full_request_pdu + 6, registerValue, numberOfDataBytes);
     return _request(full_request_pdu, numberOfDataBytes+6, response_pdu, responseLength);

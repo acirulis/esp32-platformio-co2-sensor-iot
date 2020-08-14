@@ -6,7 +6,7 @@
 #include <soc/rtc_cntl_reg.h>
 #include <esp32-hal-cpu.h>
 #include "driver/adc.h"
-#include "../lib/Sunrise/Sunrise.h"
+#include <Sunrise.h>
 #include <esp_wifi.h>
 #include <esp_bt.h>
 
