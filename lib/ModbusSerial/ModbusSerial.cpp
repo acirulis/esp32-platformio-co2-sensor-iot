@@ -9,7 +9,7 @@ const int STATUS_OK = 0;
 const int STATUS_NO_RESPONSE = -2;
 const int STATUS_CHECKSUM_MISMATCH = -3;
 const int STATUS_SLAVE_ADDRESS_NOT_DEFINED = -1;
-const int STATUS_ADU_NOT_PREPARED = -4;
+const int STATUS_STATE_DATA_MISSING = -4;
 
 
 /**
@@ -33,7 +33,7 @@ ModbusSerial::ModbusSerial(byte rxpin, byte txpin, int baud, int slave) {
 }
 
 
-int ModbusSerial::readHoldingRegisters(uint16_t startingAddress, uint16_t quantityOfRegisters,
+int ModbusSerial::readHoldingRegisters(const uint16_t startingAddress, const uint16_t quantityOfRegisters,
                                        byte *response_pdu) {
     byte functionCode = 0x03;
     int response_pdu_len = 2 * quantityOfRegisters + 2;
@@ -42,7 +42,7 @@ int ModbusSerial::readHoldingRegisters(uint16_t startingAddress, uint16_t quanti
     return _request(request_pdu, sizeof(request_pdu), response_pdu, response_pdu_len);
 }
 
-int ModbusSerial::readInputRegisters(uint16_t startingAddress, uint16_t quantityOfRegisters,
+int ModbusSerial::readInputRegisters(const uint16_t startingAddress, const uint16_t quantityOfRegisters,
                                      byte *response_pdu) {
     byte functionCode = 0x04;
     int response_pdu_len = 2 * quantityOfRegisters + 2;
@@ -51,23 +51,30 @@ int ModbusSerial::readInputRegisters(uint16_t startingAddress, uint16_t quantity
     return _request(request_pdu, sizeof(request_pdu), response_pdu, response_pdu_len);
 }
 
-int ModbusSerial::writeMultipleRegisters(const byte *startingAddress, const byte *numberOfRegister,
+int ModbusSerial::writeMultipleRegisters(const uint16_t startingAddress, const uint16_t numberOfRegisters,
                                          const byte numberOfDataBytes,
-                                         const byte *registerValue, byte *response_pdu) {
+                                         const byte *registerValues, byte *response_pdu) {
     byte functionCode = 0x10; //decimal 16
-    int responseLength = 8;
-    const byte request_pdu[] = {functionCode, startingAddress[0], startingAddress[1], numberOfRegister[0],
-                                numberOfRegister[1], numberOfDataBytes};
+    int response_pdu_len = 5;
+    const byte request_pdu[] = {functionCode, _HI(startingAddress), _LO(startingAddress), _HI(numberOfRegisters),
+                                _LO(numberOfRegisters), numberOfDataBytes};
     byte *full_request_pdu = new byte[numberOfDataBytes + 6];
     memcpy(full_request_pdu, request_pdu, 6);
-    memcpy(full_request_pdu + 6, registerValue, numberOfDataBytes);
-    return _request(full_request_pdu, numberOfDataBytes + 6, response_pdu, responseLength);
+    memcpy(full_request_pdu + 6, registerValues, numberOfDataBytes);
+    int result = _request(full_request_pdu, numberOfDataBytes + 6, response_pdu, response_pdu_len);
+    delete[] full_request_pdu;
+    return result;
 }
 
-int ModbusSerial::readDeviceIdentification(byte *request, byte *response) {
-//    byte functionCode = 0x2B;
-//    byte functionCod2 = 0x0E;
-    return STATUS_OK;
+int ModbusSerial::readDeviceIdentification(const byte objectId, const byte objectLength, byte *response_pdu) {
+    byte functionCode = 0x2B;
+    int response_pdu_len = 9 + objectLength;
+    const byte request_pdu[] = {functionCode, 0x0E, 0x04, objectId};
+    bool debug_current = _debug;
+    _debug = false; //disable debug for ID read
+    int result = _request(request_pdu, sizeof(request_pdu), response_pdu, response_pdu_len);
+    _debug = debug_current;
+    return result;
 }
 
 int ModbusSerial::_request(const byte *request_pdu, const int req_pdu_len, byte *response, const int resp_pdu_len) {
@@ -125,13 +132,13 @@ void ModbusSerial::setCrc() {
     byte *buffer = new byte[1 + modbusAdu.pdu_size];
     buffer[0] = modbusAdu.address;
     memcpy(buffer + 1, modbusAdu.pdu, modbusAdu.pdu_size);
-    modbusAdu.crc = crc16(buffer, modbusAdu.pdu_size + 1);
+    modbusAdu.crc = crc16(buffer, 1 + modbusAdu.pdu_size);
     delete[] buffer;
 }
 
 bool ModbusSerial::validateCrc(const byte *buffer, int adu_len) {
     uint16_t crc = crc16(buffer, adu_len - 2);
-    return (crc != _JOIN(buffer[adu_len - 1], buffer[adu_len - 2]));
+    return (crc == _JOIN(buffer[adu_len - 2], buffer[adu_len - 1]));
 }
 
 // Compute the MODBUS RTU CRC

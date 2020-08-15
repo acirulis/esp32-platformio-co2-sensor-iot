@@ -20,6 +20,8 @@
 #define STAPSK  "viensdivitris"
 #endif
 
+typedef uint8_t byte;
+
 const char *ssid = STASSID;
 const char *password = STAPSK;
 //const char *mqtt_server = "192.168.88.22";
@@ -33,15 +35,19 @@ char msg_debug[10];
 char msg_tmp[10];
 
 RTC_DATA_ATTR float minutesSinceFirstBoot = 0.0;
+RTC_DATA_ATTR float sunriseABCtimeoutMins = 0.0; //must increment ABC calibration value every hour
+RTC_DATA_ATTR bool stateDataUpdated = false;
+RTC_DATA_ATTR byte sunriseStateData[24];
 
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-#define RXD2 16 //RXX2 pin
+#define RXD2 16 //RX2 pin
 #define TXD2 17 //TX2 pin
 #define SENS_ENABLE 23
 #define SENS_RDY 22
-#define byte uint8_t
+
+Sunrise sunrise(RXD2, TXD2, false);
 
 //MHZ co2(RXD2, TXD2, MHZ14A);
 
@@ -58,6 +64,7 @@ void goToDeepSleep(int minutes) {
     Serial.println(minutes);
     Serial.flush();
     minutesSinceFirstBoot += minutes + (millis() / 1000 / 60.0);
+    sunriseABCtimeoutMins += minutes + (millis() / 1000 / 60.0);
     esp_deep_sleep_start();
 }
 
@@ -110,35 +117,7 @@ void reconnect() {
 }
 
 
-// Compute the MODBUS RTU CRC
-uint16_t ModRTU_CRC(byte *buf, int len) {
-    uint16_t crc = 0xFFFF;
-
-    for (int pos = 0; pos < len; pos++) {
-        crc ^= (uint16_t) buf[pos];          // XOR byte into least sig. byte of crc
-
-        for (int i = 8; i != 0; i--) {    // Loop over each bit
-            if ((crc & 0x0001) != 0) {      // If the LSB is set
-                crc >>= 1;                    // Shift right and XOR 0xA001
-                crc ^= 0xA001;
-            } else                            // Else LSB is not set
-                crc >>= 1;                    // Just shift right
-        }
-    }
-    // Note, this number has low and high bytes swapped, so use it accordingly (or swap bytes)
-    return crc;
-}
-
-
 int readPPMSerialSingle() {
-//    const byte requestReading[] = {0x68, 0x04, 0x00, 0x00, 0x00, 0x04, 0xF8, 0xF0};
-    const byte requestReading[] = {0x68, 0x04, 0x00, 0x00, 0x00, 0x05, 0x39, 0x30}; //with temp
-    int len = sizeof(requestReading) / sizeof(requestReading[0]);
-    const byte startMeasurement[] = {0x68, 0x10, 0x00, 0x21, 0x00, 0x01, 0x02, 0x00, 0x01, 0xA3, 0x73};
-    int len_sm = sizeof(startMeasurement) / sizeof(startMeasurement[0]);
-    byte result[15];
-    char received;
-//    int measurement_result;
 
     // STEP 1 - DRIVE EN HIGH
     digitalWrite(SENS_ENABLE, HIGH);
@@ -147,72 +126,46 @@ int readPPMSerialSingle() {
     delay(35);
 
     // STEP 3.2 - SENSOR DATA DOES NOT EXIST, START SINGLE MEASUREMENT
-    Serial.println("Sending StartMeasurement command");
-    for (int i = 0; i < len_sm; i++) {
-        Serial2.write(startMeasurement[i]);
-    }
-    Serial.print("Response: ");
-    long int waited = 0L;
-    while (Serial2.available() < 8) {
-        waited++;
-        if (waited > 100000L) {
-            Serial.print("Serial2 read error.");
-            goToDeepSleep(2);
+    if (stateDataUpdated) {
+        //check if ABC timer needs to be increased
+        if (sunriseABCtimeoutMins > 60) {
+            uint16_t currentABC = _JOIN(sunriseStateData[0], sunriseStateData[1]);
+            currentABC++; //increase by one
+            sunriseStateData[0] = _HI(currentABC); //and write back
+            sunriseStateData[1] = _LO(currentABC);
+            sunriseABCtimeoutMins = 0.0; //and reset to 0;
+            Serial.print("ABC timer increased to: ");
+            Serial.printf("%.2X\n", currentABC);
         }
+        //start measurement
+        sunrise.startMeasurementWithStateData(sunriseStateData);
+    } else {
+        //TODO Something wrong!!!!
+        sunrise.startMeasurement();
     }
-    for (int i = 0; i < 8; i++) {
-        received = Serial2.read();
-        Serial.printf("%.2X", received);
-        Serial.print(" ");
-    }
-    Serial.println("");
+    stateDataUpdated = false;
+
 
     // STEP 4 - WAIT RDY LOW or 2 sec
     while (digitalRead(SENS_RDY));
 
     // STEP 5 - Read IR1-IR5
-    Serial.println("Step5: requestReading");
-    for (int i = 0; i < len; i++) {
-        Serial2.write(requestReading[i]);
-    }
-    waited = 0L;
-    while (Serial2.available() < 15) {
-        waited++;
-        if (waited > 100000L) {
-            Serial.println("Timout while reading serial");
-            digitalWrite(SENS_ENABLE, LOW);
-            return -2;
-        }
-    }; // wait for response
-    Serial.print("Response : ");
-    for (int i = 0; i < 15; i++) {
-        result[i] = Serial2.read();
-        Serial.printf("%.2X", result[i]);
-        Serial.print(" ");
-    }
-    Serial.println("");
-    uint16_t crc = ModRTU_CRC(result, 13);
-    int crc_high = result[13];
-    int crc_low = result[14];
-    if (crc == crc_low * 256 + crc_high) {
-        int low = result[10];
-        int high = result[9];
-        //TODO temp is in 12,11 (0x091A == 2330 == 23.30 C)
-        digitalWrite(SENS_ENABLE, LOW);
-        return high * 256 + low;
-        //TODO Step 6. read sensor state data and store in RTC
-        //TODO Step 7. Drive EN pin low
+    int reading = sunrise.requestReading();
+
+    // STEP 6 - read sensor state data;
+    if (sunrise.readStateData(sunriseStateData) == STATUS_OK) {
+        stateDataUpdated = true;
     } else {
-        Serial.print("CRC incorrect. Got: ");
-        Serial.print(crc);
-        Serial.print(" expected: ");
-        Serial.println(crc_low * 256 + crc_high);
-        digitalWrite(SENS_ENABLE, LOW);
-        return -1;
+        stateDataUpdated = false;
+        //TODO Something wrong!!!
     }
+
+    // STEP 7 - Drive EN pin low
+    digitalWrite(SENS_ENABLE, LOW);
+
+    return reading;
 }
 
-Sunrise sunrise(RXD2, TXD2, true);
 
 void setup() {
     WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout reset (low power reset)
@@ -220,33 +173,50 @@ void setup() {
 //    int cs = getCpuFrequencyMhz(); //Get CPU clock
 
     Serial.begin(115200);
-    Serial.println("Setup finished");
+
     pinMode(SENS_RDY, INPUT);
     pinMode(SENS_ENABLE, OUTPUT);
     digitalWrite(SENS_ENABLE, LOW);
 
-//    Serial.println("Setting mode to continuous after 10 sec");
+//    Serial.println("Setting mode to single after 10 sec");
 //    delay(10000);
-//    setContMeasurementMode();
+//    sunrise.setSingleMeasurementMode();
 //    Serial.println("Waiting for 10 sec");
 //    delay(10000);
-
+    if (minutesSinceFirstBoot < 1) {
+        digitalWrite(SENS_ENABLE, HIGH);
+        delay(35);
+        int mm = sunrise.getCurrentMeasurementMode();
+        Serial.print("Measurement mode: ");
+        if (mm == MEASUREMENT_MODE_SINGLE) {
+            Serial.println("SINGLE");
+        } else {
+            Serial.println("CONTINUOUS");
+        }
+        Serial.print("Sensor registered: ");
+        sunrise.printDeviceIdentification();
+        Serial.println("");
+        // READ STATE DATA FOR FUTURE USE!
+        if (sunrise.readStateData(sunriseStateData) == STATUS_OK) {
+            stateDataUpdated = true;
+        }
+        digitalWrite(SENS_ENABLE, LOW);
+    }
+    Serial.println("Setup function finished");
 }
 
 
 void loop() {
-    Serial.println("DEBUGIN NEW LIB");
-
-//    int mm = sunrise.getCurrentMeasurementMode();
-//    Serial.print("MM: ");
-//    Serial.println(mm);
-    Serial.println("END DEBUGGIN NEW LIB");
 
 
     Serial.print("Starting to read (min_since_start): ");
     Serial.println(minutesSinceFirstBoot);
-//    int reading = readPPMSerialSingle();
-    int reading = sunrise.requestReading();
+    Serial.print("State: ");
+    for (int i = 0; i < 24; i++) {
+        Serial.printf("%.2X ", sunriseStateData[i]);
+    }
+    Serial.println("");
+    int reading = readPPMSerialSingle();
     if (reading > 0) {
         Serial.print("CO2: ");
         Serial.println(reading);

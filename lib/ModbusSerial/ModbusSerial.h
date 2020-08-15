@@ -15,6 +15,7 @@ extern const int STATUS_OK;
 extern const int STATUS_NO_RESPONSE;
 extern const int STATUS_CHECKSUM_MISMATCH;
 extern const int STATUS_SLAVE_ADDRESS_NOT_DEFINED;
+extern const int STATUS_STATE_DATA_MISSING;
 
 struct ModbusAdu {
     byte address;
@@ -34,14 +35,14 @@ public:
 
     void setDebug(bool enable);
 
-    int readHoldingRegisters(uint16_t startingAddress, uint16_t quantityOfRegisters, byte *response_pdu);
+    int readHoldingRegisters(const uint16_t startingAddress, const uint16_t quantityOfRegisters, byte *response_pdu);
 
-    int readInputRegisters(uint16_t startingAddress, uint16_t quantityOfRegisters, byte *response_pdu);
+    int readInputRegisters(const uint16_t startingAddress, const uint16_t quantityOfRegisters, byte *response_pdu);
 
-    int writeMultipleRegisters(const byte *startingAddress, const byte *numberOfRegister, const byte numberOfDataBytes,
-                               const byte *registerValue, byte *response_pdu);
+    int writeMultipleRegisters(const uint16_t startingAddress, const uint16_t numberOfRegisters, const byte numberOfDataBytes,
+                               const byte *registerValues, byte *response_pdu);
 
-    int readDeviceIdentification(byte *request, byte *response);
+    int readDeviceIdentification(const byte objectId, const byte objectLength, byte *response_pdu);
 
 private:
     bool _debug = false;

@@ -24,6 +24,14 @@ public:
 
     float getLastTemp();
 
+    void printDeviceIdentification();
+
+    int startMeasurement();
+
+    int startMeasurementWithStateData(const byte *stateData);
+
+    int readStateData(byte *stateData);
+
 private:
     bool _debug = false;
     ModbusSerial mbs;
