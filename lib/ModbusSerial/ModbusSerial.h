@@ -16,31 +16,45 @@ extern const int STATUS_NO_RESPONSE;
 extern const int STATUS_CHECKSUM_MISMATCH;
 extern const int STATUS_SLAVE_ADDRESS_NOT_DEFINED;
 
+struct ModbusAdu {
+    byte address;
+    const byte *pdu;
+    int pdu_size;
+    uint16_t crc;
+};
+
+
+byte _HI(const uint16_t a);
+byte _LO(const uint16_t a);
+uint16_t _JOIN(const byte byte_hi, const byte byte_lo);
+
 class ModbusSerial {
 public:
     ModbusSerial(byte rxpin, byte txpin, int baud, int slave);
 
     void setDebug(bool enable);
 
-    int readHoldingRegisters(const byte *startingAddress, const byte *quantityOfRegisters,
-                             byte *response_pdu);
+    int readHoldingRegisters(uint16_t startingAddress, uint16_t quantityOfRegisters, byte *response_pdu);
 
-    int readInputRegisters(const byte *startingAddress, const byte *quantityOfRegisters,
-                           byte *response_pdu);
+    int readInputRegisters(uint16_t startingAddress, uint16_t quantityOfRegisters, byte *response_pdu);
 
     int writeMultipleRegisters(const byte *startingAddress, const byte *numberOfRegister, const byte numberOfDataBytes,
                                const byte *registerValue, byte *response_pdu);
 
     int readDeviceIdentification(byte *request, byte *response);
 
-    int make_int(const byte byte_hi, const byte byte_lo);
-
 private:
     bool _debug = false;
-    byte _slave = 0x00; //not set
-    int _request(const byte *request, const int req_size, byte *response, const int resp_size);
+    ModbusAdu modbusAdu;
 
-    uint16_t calculateCRC(const byte *buf, const int len);
+    int _request(const byte *request, const int req_pdu_len, byte *response, const int resp_pdu_len);
+
+    uint16_t crc16(const byte *buf, const int len);
+
+    void setCrc();
+
+    bool validateCrc(const byte *buffer, int adu_len);
+
 };
 
 #endif //ESP32_PLATFORMIO_MODBUSSERIAL_H

@@ -12,13 +12,11 @@ Sunrise::Sunrise(byte rxpin, byte txpin, bool debug) : mbs(rxpin, txpin, 9600, 0
 }
 
 int Sunrise::requestReading() {
-    byte response[15];
-    const byte startingAddress[] = {0x00, 0x00};
-    const byte quantityOfRegisters[] = {0x00, 0x05};
-    int r = mbs.readInputRegisters(startingAddress, quantityOfRegisters, response);
+    byte response[12];
+    int r = mbs.readInputRegisters(0x0000, 0x0005, response);
     if (r == STATUS_OK) {
-        int co2 = mbs.make_int(response[9], response[10]);
-        _lastTemp = mbs.make_int(response[11], response[12]);
+        int co2 = _JOIN(response[8], response[9]);
+        _lastTemp = _JOIN(response[10], response[11]);
         return co2;
     } else {
         return r;
@@ -27,11 +25,9 @@ int Sunrise::requestReading() {
 
 int Sunrise::getCurrentMeasurementMode() {
     byte response[7];
-    const byte startingAddress[] = {0x00, 0x0A};
-    const byte quantityOfRegisters[] = {0x00, 0x01};
-    int r = mbs.readHoldingRegisters(startingAddress, quantityOfRegisters, response);
+    int r = mbs.readHoldingRegisters(0x000A, 0x0001, response);
     if (r == STATUS_OK) {
-        int mm = mbs.make_int(response[3], response[4]);
+        int mm = _JOIN(response[3], response[4]);
         if (mm == 0) {
             return MEASUREMENT_MODE_CONTINUOUS;
         } else {

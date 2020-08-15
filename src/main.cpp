@@ -215,8 +215,7 @@ int readPPMSerialSingle() {
 Sunrise sunrise(RXD2, TXD2, true);
 
 void setup() {
-    //disable brownout reset (low power reset)
-    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout reset (low power reset)
     setCpuFrequencyMhz(80); //Set CPU clock to 80MHz fo example
 //    int cs = getCpuFrequencyMhz(); //Get CPU clock
 
@@ -238,9 +237,9 @@ void setup() {
 void loop() {
     Serial.println("DEBUGIN NEW LIB");
 
-    int mm = sunrise.getCurrentMeasurementMode();
-    Serial.print("MM: ");
-    Serial.println(mm);
+//    int mm = sunrise.getCurrentMeasurementMode();
+//    Serial.print("MM: ");
+//    Serial.println(mm);
     Serial.println("END DEBUGGIN NEW LIB");
 
 
