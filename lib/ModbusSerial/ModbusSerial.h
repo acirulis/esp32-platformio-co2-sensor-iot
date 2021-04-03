@@ -26,7 +26,9 @@ struct ModbusAdu {
 
 
 byte _HI(const uint16_t a);
+
 byte _LO(const uint16_t a);
+
 uint16_t _JOIN(const byte byte_hi, const byte byte_lo);
 
 class ModbusSerial {
@@ -39,7 +41,8 @@ public:
 
     int readInputRegisters(const uint16_t startingAddress, const uint16_t quantityOfRegisters, byte *response_pdu);
 
-    int writeMultipleRegisters(const uint16_t startingAddress, const uint16_t numberOfRegisters, const byte numberOfDataBytes,
+    int writeMultipleRegisters(const uint16_t startingAddress, const uint16_t numberOfRegisters,
+                               const byte numberOfDataBytes,
                                const byte *registerValues, byte *response_pdu);
 
     int readDeviceIdentification(const byte objectId, const byte objectLength, byte *response_pdu);
@@ -48,7 +51,8 @@ private:
     bool _debug = false;
     ModbusAdu modbusAdu;
 
-    int _request(const byte *request, const int req_pdu_len, byte *response, const int resp_pdu_len);
+    int
+    _request(const byte *request, const int req_pdu_len, byte *response, const int resp_pdu_len, bool addDelay = false);
 
     uint16_t crc16(const byte *buf, const int len);
 

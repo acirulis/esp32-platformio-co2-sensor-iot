@@ -18,6 +18,10 @@ public:
 
     int getCurrentMeasurementMode();
 
+    int getCurrentSettings();
+
+    int setFactoryCalib();
+
     int setSingleMeasurementMode();
 
     int setContinuousMeasurementMode();

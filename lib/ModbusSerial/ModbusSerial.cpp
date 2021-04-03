@@ -61,7 +61,7 @@ int ModbusSerial::writeMultipleRegisters(const uint16_t startingAddress, const u
     byte *full_request_pdu = new byte[numberOfDataBytes + 6];
     memcpy(full_request_pdu, request_pdu, 6);
     memcpy(full_request_pdu + 6, registerValues, numberOfDataBytes);
-    int result = _request(full_request_pdu, numberOfDataBytes + 6, response_pdu, response_pdu_len);
+    int result = _request(full_request_pdu, numberOfDataBytes + 6, response_pdu, response_pdu_len, true);
     delete[] full_request_pdu;
     return result;
 }
@@ -77,7 +77,7 @@ int ModbusSerial::readDeviceIdentification(const byte objectId, const byte objec
     return result;
 }
 
-int ModbusSerial::_request(const byte *request_pdu, const int req_pdu_len, byte *response, const int resp_pdu_len) {
+int ModbusSerial::_request(const byte *request_pdu, const int req_pdu_len, byte *response, const int resp_pdu_len, bool addDelay) {
     if (modbusAdu.address == 0) {
         return STATUS_SLAVE_ADDRESS_NOT_DEFINED;
     }
@@ -100,6 +100,9 @@ int ModbusSerial::_request(const byte *request_pdu, const int req_pdu_len, byte 
     if (_debug) Serial.println("");
 
     //RESPONSE
+    if (addDelay) {
+        vTaskDelay(25);
+    }
     long int waited = 0L;
     int resp_adu_len = resp_pdu_len + 3; //add address & crc bytes
     while (Serial2.available() < resp_adu_len) {
@@ -108,6 +111,11 @@ int ModbusSerial::_request(const byte *request_pdu, const int req_pdu_len, byte 
             if (_debug) {
                 Serial.print("Last available() value: ");
                 Serial.println(Serial2.available());
+                Serial.print("R: ");
+                for (int i = 0; i < Serial2.available(); i++) {
+                    Serial.printf("%.2X ", Serial2.read());
+                }
+                Serial.println("");
             }
             return STATUS_NO_RESPONSE;
         }

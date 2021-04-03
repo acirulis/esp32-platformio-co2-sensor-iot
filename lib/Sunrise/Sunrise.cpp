@@ -38,6 +38,30 @@ int Sunrise::getCurrentMeasurementMode() {
     }
 }
 
+
+
+
+int Sunrise::getCurrentSettings() {
+    byte response[7];
+    int r = mbs.readHoldingRegisters(0x0000, 0x0001, response);
+    if (r == STATUS_OK) {
+       return true;
+    } else {
+        return false;
+    }
+}
+
+//int Sunrise::setCurrentSettings() {
+//    byte response[7];
+//    int r = mbs.readHoldingRegisters(0x0000, 0x0001, response);
+//    int r = mbs.writeHoldingRegisters
+//    if (r == STATUS_OK) {
+//        return true;
+//    } else {
+//        return false;
+//    }
+//}
+
 int Sunrise::setSingleMeasurementMode() {
     byte response[8];
     const byte registerValue[] = {0x00, 0x01};
@@ -56,6 +80,13 @@ int Sunrise::startMeasurement() {
     byte response[8];
     const byte registerValue[] = {0x00, 0x01};
     int r = mbs.writeMultipleRegisters(0x0021, 0x0001, 0x02, registerValue, response);
+    return r;
+}
+
+int Sunrise::setFactoryCalib() {
+    byte response[8];
+    const byte registerValue[] = {0x7C, 0x02};
+    int r = mbs.writeMultipleRegisters(0x0001, 0x0001, 0x02, registerValue, response);
     return r;
 }
 
