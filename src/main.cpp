@@ -1,7 +1,6 @@
 #include <HardwareSerial.h>
-#include <WiFiClient.h>
-#include <WiFi.h>
 #include <PubSubClient.h>
+#include <WiFiManager.h> // https://github.com/tzapu/WiFiManager
 #include <soc/soc.h>
 #include <soc/rtc_cntl_reg.h>
 #include <esp32-hal-cpu.h>
@@ -16,16 +15,18 @@
 //#define STAPSK  "WhiteDigital2015"
 //#define STASSID "ALHN-84DB"
 //#define STAPSK  "4914040374"
-#define STASSID "MikroTik-Andis2"
-#define STAPSK  "viensdivitris"
+//#define STASSID "WD_guests"
+//#define STAPSK  "Spikeri21"
 #endif
 
 typedef uint8_t byte;
 
-const char *ssid = STASSID;
-const char *password = STAPSK;
+//const char *ssid = STASSID;
+//const char *password = STAPSK;
 //const char *mqtt_server = "192.168.88.22";
-const char *mqtt_server = "192.168.88.242";
+const char *mqtt_server = "207.154.238.45";
+const char *mqtt_user = "venti";
+const char *mqtt_password = "venti12pwm";
 IPAddress ip(192, 168, 88, 177);
 IPAddress gateway(192, 168, 88, 1);
 IPAddress subnet(255, 255, 255, 0);
@@ -46,6 +47,10 @@ PubSubClient client(espClient);
 #define TXD2 17 //TX2 pin
 #define SENS_ENABLE 23
 #define SENS_RDY 22
+
+#define RED_PIN 26
+#define BLUE_PIN 27
+
 
 Sunrise sunrise(RXD2, TXD2, false);
 
@@ -68,40 +73,43 @@ void goToDeepSleep(int minutes) {
     esp_deep_sleep_start();
 }
 
-void setup_wifi() {
-    if (WiFi.status() == WL_CONNECTED) return;
-    Serial.print("Starting Wifi connection to ");
-    Serial.println(ssid);
-    WiFi.mode(WIFI_STA);
-    WiFi.config(ip, gateway, subnet);
-    WiFi.begin(ssid, password);
-    int failed_counter = 0;
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(1000);
-        Serial.print(".");
-        failed_counter++;
-        if (failed_counter > 5) {
-            Serial.println();
-            Serial.println("Wifi connection failed");
-            goToDeepSleep(2);
-        }
-    }
-    Serial.println();
-    Serial.println("WiFi connected");
-    Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());
-}
+//void setup_wifi() {
+//    if (WiFi.status() == WL_CONNECTED) return;
+//    Serial.print("Starting Wifi connection to ");
+//    Serial.println(ssid);
+//    WiFi.mode(WIFI_STA);
+//    WiFi.config(ip, gateway, subnet);
+//    WiFi.begin(ssid, password);
+//    int failed_counter = 0;
+//    while (WiFi.status() != WL_CONNECTED) {
+//        delay(1000);
+//        Serial.print(".");
+//        failed_counter++;
+//        if (failed_counter > 5) {
+//            Serial.println();
+//            Serial.println("Wifi connection failed");
+//            goToDeepSleep(2);
+//        }
+//    }
+//    Serial.println();
+//    Serial.println("WiFi connected");
+//    Serial.print("IP address: ");
+//    Serial.println(WiFi.localIP());
+//}
 
 void reconnect() {
-    setup_wifi();
+//    setup_wifi();
     Serial.print("MQTT connect...");
     client.setServer(mqtt_server, 1883);
+
     client.setKeepAlive(70);
     int failed_counter = 0;
     while (!client.connected()) {
         Serial.print("Attempting MQTT connection...");
-        if (client.connect("Client_ESP32")) {
+        if (client.connect("Client_ESP32", mqtt_user, mqtt_password)) {
             Serial.println("connected");
+            digitalWrite(RED_PIN, LOW);
+            digitalWrite(BLUE_PIN, HIGH);
         } else {
             Serial.print("failed, rc=");
             Serial.println(client.state());
@@ -110,7 +118,8 @@ void reconnect() {
             failed_counter++;
             if (failed_counter > 4) {
                 Serial.println("MQTT connection failed");
-                goToDeepSleep(2);
+                ESP.restart();
+//                goToDeepSleep(2);
             }
         }
     }
@@ -168,8 +177,8 @@ int readPPMSerialSingle() {
 
 
 void setup() {
-    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout reset (low power reset)
-    setCpuFrequencyMhz(80); //Set CPU clock to 80MHz fo example
+//    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout reset (low power reset)
+//    setCpuFrequencyMhz(80); //Set CPU clock to 80MHz fo example
 //    int cs = getCpuFrequencyMhz(); //Get CPU clock
 
     Serial.begin(115200);
@@ -177,6 +186,21 @@ void setup() {
     pinMode(SENS_RDY, INPUT);
     pinMode(SENS_ENABLE, OUTPUT);
     digitalWrite(SENS_ENABLE, LOW);
+
+    pinMode(RED_PIN, OUTPUT);
+    pinMode(BLUE_PIN, OUTPUT);
+    digitalWrite(RED_PIN, HIGH);
+
+    WiFiManager wm;
+//    wm.resetSettings();
+    bool res;
+    res = wm.autoConnect("CO2_SENSOR");
+    if (!res) {
+        Serial.println("Failed to connect");
+        ESP.restart();
+    } else {
+        Serial.println("connected...yeey :)");
+    }
 
 //    Serial.println("Setting mode to single after 10 sec");
 //    delay(10000);
@@ -223,20 +247,23 @@ void loop() {
         Serial.print("Temp: ");
         Serial.println(sunrise.getLastTemp());
         if (!client.connected()) {
+            digitalWrite(RED_PIN, HIGH);
+            digitalWrite(BLUE_PIN, LOW);
             reconnect();
         }
-        sprintf(msg, "%i", reading);
-        client.publish("CO2", msg);
-        sprintf(msg_debug, "Reading OK [%4.2f]", minutesSinceFirstBoot);
-        client.publish("DEBUG", msg_debug);
+        sprintf(msg, "{\"co2\": %i}", reading);
+        client.publish("venti/cc", msg);
+        vTaskDelay(500);
+//        sprintf(msg_debug, "Reading OK [%4.2f]", minutesSinceFirstBoot);
+//        client.publish("DEBUG", msg_debug);
     } else {
         if (!client.connected()) {
             reconnect();
         }
         Serial.print("Reading result: ");
         Serial.println(reading);
-        sprintf(msg_debug, "UART error: %i", reading);
-        client.publish("DEBUG", msg_debug);
+//        sprintf(msg_debug, "UART error: %i", reading);
+//        client.publish("DEBUG", msg_debug);
     }
 
     goToDeepSleep(2);
