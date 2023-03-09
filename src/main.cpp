@@ -176,6 +176,12 @@ int readPPMSerialSingle() {
 }
 
 
+void WifiManagerTimeout()
+{
+    Serial.println("Going to reboot from WifiManagerTimeout");
+    ESP.restart();
+}
+
 void setup() {
 //    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout reset (low power reset)
 //    setCpuFrequencyMhz(80); //Set CPU clock to 80MHz fo example
@@ -192,6 +198,8 @@ void setup() {
     digitalWrite(RED_PIN, HIGH);
 
     WiFiManager wm;
+    wm.setConfigPortalTimeout(180);
+    wm.setConfigPortalTimeoutCallback(WifiManagerTimeout);
 //    wm.resetSettings();
     bool res;
     res = wm.autoConnect("CO2_SENSOR");
